@@ -4,6 +4,9 @@ $transcodedExtension = "mp4"
 
 function Transcoder-ProcessFile($SourcePath, $DestinationPath)
 {
+    $SourcePath = $SourcePath.TrimEnd('\')
+    $DestinationPath = $DestinationPath.TrimEnd('\')
+
     if (Test-Path -Path $DestinationPath)
     {
         Write-Warning -Message "File $DestinationPath already exists, skipping ..."
@@ -18,7 +21,7 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath)
     }
     
     $dirPath = [System.IO.Path]::GetDirectoryName($DestinationPath)
-    
+
     Transcoder-CreateFolderStructure -FolderPath $dirPath
     
     if (Transcoder-IsVideo -SourcePath $SourcePath)
@@ -59,6 +62,9 @@ function Transcoder-ProcessList($SourceList, $DestinationList)
 
 function Transcoder-ProcessFolder($SourcePath, $DestinationPath, $groupSize = 6)
 {
+    $SourcePath = $SourcePath.TrimEnd('\')
+    $DestinationPath = $DestinationPath.TrimEnd('\')
+
     $sourceGroups = @()
     $destinationGroups = @()
     
