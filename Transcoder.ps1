@@ -2,7 +2,58 @@
 $ffprobePath = "D:\Transcoding\ffprobe.exe"
 $transcodedExtension = "mp4"
 
-function Transcoder-ProcessFile($SourcePath, $DestinationPath)
+class TrackConfiguration
+{
+    [Collections.Generic.Dictionary[string, int32]] $Disposition = @{}
+    [Collections.Generic.Dictionary[string, string]] $Tags = @{}
+
+    [void] Deserialise($hashTable)
+    {
+        $d = @{}
+        $t = @{}
+        
+        $hashTable.Disposition.psobject.properties | Foreach { $d[$_.Name] = $_.Value }
+        $hashTable.Tags.psobject.properties | Foreach { $t[$_.Name] = $_.Value }
+
+        $d.Keys | foreach {
+            $key = $_
+            $this.Disposition.Add($key, $d[$key])
+        }
+
+        $t.Keys | foreach {
+            $key = $_
+            
+            $this.Tags.Add($key, $t[$key])
+        }
+        
+    }
+}
+
+class TranscoderConfiguration
+{
+  [int32] $GroupSize = 6
+  [TrackConfiguration[]] $TrackConfigurations = @()
+
+  [void] Deserialize($hashTable)
+  {
+    $this.GroupSize = $hashTable.GroupSize
+    
+    $this.TrackConfigurations = @($null) * $hashTable.TrackConfigurations.Count
+
+    $index = 0
+    $hashTable.TrackConfigurations | foreach {
+        $tc = [TrackConfiguration]::new()
+        
+        $tc.Deserialise($hashTable.TrackConfigurations[$index])
+
+        $this.TrackConfigurations[$index] = $tc
+
+        $index++
+    }
+  }
+}
+
+function Transcoder-ProcessFile($SourcePath, $DestinationPath, [TranscoderConfiguration] $Configuration = [TranscoderConfiguration]::new())
 {
     $SourcePath = $SourcePath.TrimEnd('\')
     $DestinationPath = $DestinationPath.TrimEnd('\')
@@ -26,7 +77,39 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath)
     
     if (Transcoder-IsVideo -SourcePath $SourcePath)
     {
-        & $ffmpegPath -i "$SourcePath" -c:v libx265 -crf 28 -preset fast -vtag hvc1 -c:a copy -c:s copy "$mp4DestinationPath"
+        $audioMetadaArguments = ""
+        $dispositionMetadataArguments = ""
+
+        $index = 0
+        $Configuration.TrackConfigurations | foreach {
+            [TrackConfiguration] $trackConfiguration = $_
+            
+            $trackConfiguration.Tags.Keys | foreach {
+                $key = $_
+                $value = $trackConfiguration.Tags[$key]
+
+                $audioMetadaArguments += " -metadata:s:a:$index $key=$value"
+            }
+
+            $trackConfiguration.Disposition.Keys | foreach {
+                $key = $_
+                $value = $trackConfiguration.Disposition[$key]
+
+                $v = $key
+
+                if ($value -eq 0) {
+                    $v = 0
+                }
+
+                $dispositionMetadataArguments += " -disposition:a:$index $v"
+            }
+
+            $index++
+        }
+
+        $allArguments = $audioMetadaArguments.Substring(1) + $dispositionMetadataArguments
+
+        iex "& $ffmpegPath -i '$SourcePath' -map 0 -c:v libx265 -crf 28 -preset fast -vtag hvc1 -c:a copy $allArguments -c:s copy '$mp4DestinationPath'"
     }
     else
     {
@@ -34,25 +117,33 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath)
     }
 }
 
-function Transcoder-ProcessList($SourceList, $DestinationList)
+function Transcoder-ProcessList($SourceList, $DestinationList, [TranscoderConfiguration] $Configuration = [TranscoderConfiguration]::new())
 {
     $jobs = @()
     
     $index = 0
-
+    
     $sourceList | foreach {
         $originalFilePath = $_.FullName
         $transcodedFilePath = $DestinationList[$index]
         
         $ScriptBlock = {
-            param($srcFilePath, $destFilePath, $scriptPath) 
-            
-            . $scriptPath
+            param($srcFilePath, $destFilePath, $blockConfiguration, $scriptPath) 
 
-            Transcoder-ProcessFile -SourcePath $srcFilePath -DestinationPath $destFilePath
+            . $scriptPath
+            #$blockConfiguration
+            
+            $hashTable = @{}
+            (ConvertFrom-Json $blockConfiguration).psobject.properties | Foreach { $hashTable[$_.Name] = $_.Value }
+
+
+            [TranscoderConfiguration] $conf = [TranscoderConfiguration]::new()
+            $conf.Deserialize($hashTable)
+
+            Transcoder-ProcessFile -SourcePath $srcFilePath -DestinationPath $destFilePath -Configuration $conf
           }
 
-        $jobs += Start-Job $ScriptBlock -ArgumentList ($originalFilePath, $transcodedFilePath, $PSCommandPath)
+        $jobs += Start-Job $ScriptBlock -ArgumentList ($originalFilePath, $transcodedFilePath, (ConvertTo-Json $Configuration -Depth 10), $PSCommandPath)
 
         $index++
     }
@@ -60,7 +151,7 @@ function Transcoder-ProcessList($SourceList, $DestinationList)
     $jobs | Receive-Job -Wait -AutoRemoveJob
 }
 
-function Transcoder-ProcessFolder($SourcePath, $DestinationPath, $groupSize = 6)
+function Transcoder-ProcessFolder($SourcePath, $DestinationPath, [TranscoderConfiguration] $Configuration = [TranscoderConfiguration]::new())
 {
     $SourcePath = $SourcePath.TrimEnd('\')
     $DestinationPath = $DestinationPath.TrimEnd('\')
@@ -85,7 +176,7 @@ function Transcoder-ProcessFolder($SourcePath, $DestinationPath, $groupSize = 6)
         $sourceGroups[$index] += $_
         $destinationGroups[$index] += $_.FullName.Replace($SourcePath, $destinationPath)
         
-        if ($sourceGroups[$index].Count -eq $groupSize)
+        if ($sourceGroups[$index].Count -eq $Configuration.GroupSize)
         {
             $index++
         }
@@ -93,7 +184,7 @@ function Transcoder-ProcessFolder($SourcePath, $DestinationPath, $groupSize = 6)
 
     $index = 0
     $sourceGroups | foreach {
-        Transcoder-ProcessList -SourceList $_ -DestinationList $destinationGroups[$index]
+        Transcoder-ProcessList -SourceList $_ -DestinationList $destinationGroups[$index] -Configuration $Configuration
         $index++
     }
 }
@@ -126,7 +217,23 @@ function Transcoder-CreateFolderStructure($FolderPath)
     }
 }
 
-function test()
+function Transcoder-CreateAudioConfig($LanguageList, $DefaultList)
 {
-    Transcoder-ProcessFile -SourcePath "D:\Transcoding\Encode\Addams Family\Season 1\Addams.Family.S01E01-CZSub-aac.m4v" -DestinationPath "D:\Transcoding\Finished\Addams Family\Season 1\Addams.Family.S01E01-CZSub-aac.mp4"
+    $trackDictionary = @($null) * $LanguageList.Count
+
+    $index = 0
+    
+    $LanguageList | foreach {
+        $audio = [TrackConfiguration]::new()
+        $audio.Tags.Add("language", $_)
+        $audio.Disposition.Add("default", ($DefaultList[$index]))
+        $trackDictionary[$index] = $audio
+        
+        $index++
+    }
+
+    $conf = [TranscoderConfiguration]::new()
+    $conf.TrackConfigurations = $trackDictionary
+
+    return $conf
 }
