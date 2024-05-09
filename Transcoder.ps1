@@ -32,11 +32,13 @@ class TrackConfiguration
 class TranscoderConfiguration
 {
   [int32] $GroupSize = 6
+  [boolean] $EnablePngTrackDropping = $false
   [TrackConfiguration[]] $TrackConfigurations = @()
 
   [void] Deserialize($hashTable)
   {
     $this.GroupSize = $hashTable.GroupSize
+    $this.EnablePngTrackDropping = $hashTable.EnablePngTrackDropping
     
     $this.TrackConfigurations = @($null) * $hashTable.TrackConfigurations.Count
 
@@ -107,9 +109,20 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath, [TranscoderConfig
             $index++
         }
 
-        $allArguments = $audioMetadaArguments.Substring(1) + $dispositionMetadataArguments
+        $excludeTracksArguments = ""
 
-        iex "& $ffmpegPath -i '$SourcePath' -map 0 -c:v libx265 -crf 28 -preset fast -vtag hvc1 -c:a copy $allArguments -c:s copy '$mp4DestinationPath'"
+        if ($Configuration.EnablePngTrackDropping) {
+            $pngTracks = ((Transcoder-ListContainer -SourcePath $SourcePath).streams | where { $_.codec_name -eq 'png' }) | select -Property index
+
+            $pngTracks | foreach {
+                $i = $_.index
+                $excludeTracksArguments += " -map -0:$i"
+            }
+        }
+
+        $metadataArguments = $audioMetadaArguments.Substring(1) + $dispositionMetadataArguments
+
+        iex "& $ffmpegPath -i '$SourcePath' -map 0$excludeTracksArguments -c:v libx265 -crf 28 -preset fast -vtag hvc1 -c:a copy $metadataArguments -c:s copy '$mp4DestinationPath'"
     }
     else
     {
