@@ -112,7 +112,7 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath, [TranscoderConfig
         $excludeTracksArguments = ""
 
         if ($Configuration.EnablePngTrackDropping) {
-            $pngTracks = ((Transcoder-ListContainer -SourcePath $SourcePath).streams | where { $_.codec_name -eq 'png' }) | select -Property index
+            $pngTracks = ((Transcoder-ListContainer -SourcePath $SourcePath).streams | where { $_.codec_name -eq 'png' -or $_.codec_name -eq 'mjpeg' }) | select -Property index
 
             $pngTracks | foreach {
                 $i = $_.index
@@ -126,7 +126,7 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath, [TranscoderConfig
     }
     else
     {
-        Copy-Item -Path $SourcePath -Destination $DestinationPath
+        #Copy-Item -Path $SourcePath -Destination $DestinationPath
     }
 }
 
@@ -212,7 +212,7 @@ function Transcoder-IsVideo($SourcePath)
     $isVideo = $false
 
     $streams = (Transcoder-ListContainer -SourcePath $SourcePath).streams
-
+    $streams
     $streams | foreach {
         if ($_.codec_type -eq "video" -and $_.duration_ts -gt 1) {
             $isVideo = $true
