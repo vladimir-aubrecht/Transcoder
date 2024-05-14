@@ -121,12 +121,12 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath, [TranscoderConfig
         }
 
         $metadataArguments = $audioMetadaArguments.Substring(1) + $dispositionMetadataArguments
-
-        iex "& $ffmpegPath -i '$SourcePath' -map 0$excludeTracksArguments -c:v libx265 -crf 28 -preset fast -vtag hvc1 -c:a copy $metadataArguments -c:s copy '$mp4DestinationPath'"
+        
+        iex "& $ffmpegPath -i `"$SourcePath`" -map 0$excludeTracksArguments -c:v libx265 -crf 28 -preset fast -vtag hvc1 -c:a copy $metadataArguments -c:s copy `"$mp4DestinationPath`""
     }
     else
     {
-        #Copy-Item -Path $SourcePath -Destination $DestinationPath
+        Copy-Item -Path "$SourcePath" -Destination "$DestinationPath"
     }
 }
 
@@ -212,7 +212,11 @@ function Transcoder-IsVideo($SourcePath)
     $isVideo = $false
 
     $streams = (Transcoder-ListContainer -SourcePath $SourcePath).streams
-    $streams
+    
+    if ($streams.Count -eq 1) {
+        return $false
+    }
+    
     $streams | foreach {
         if ($_.codec_type -eq "video" -and $_.duration_ts -gt 1) {
             $isVideo = $true
