@@ -2,6 +2,8 @@
 $ffprobePath = "D:\Transcoding\ffprobe.exe"
 $transcodedExtension = "mp4"
 
+$crfTable = @{ '480p'='28'; '720p'='26'; '1080p'='24'; '2160p'='22' }
+
 class TrackConfiguration
 {
     [Collections.Generic.Dictionary[string, int32]] $Disposition = @{}
@@ -111,8 +113,24 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath, [TranscoderConfig
 
         $excludeTracksArguments = ""
 
+        $streams = (Transcoder-ListContainer -SourcePath $SourcePath).streams
+        
+        $videoStream = $streams | where { $_.codec_type -eq 'video' -and $_.duration_ts -gt 1 }
+        
+        $crf = '28'
+        if ($videoStream.coded_height -ge 720) {
+            $crf = $crfTable['720p']
+        }
+        if ($videoStream.coded_height -ge 1080) {
+            $crf = $crfTable['1080p']
+        }
+        if ($videoStream.coded_height -ge 2160) {
+            $crf = $crfTable['2160p']
+        }
+
+
         if ($Configuration.EnablePngTrackDropping) {
-            $pngTracks = ((Transcoder-ListContainer -SourcePath $SourcePath).streams | where { $_.codec_name -eq 'png' -or $_.codec_name -eq 'mjpeg' }) | select -Property index
+            $pngTracks = ($streams | where { $_.codec_name -eq 'png' -or $_.codec_name -eq 'mjpeg' }) | select -Property index
 
             $pngTracks | foreach {
                 $i = $_.index
@@ -122,7 +140,9 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath, [TranscoderConfig
 
         $metadataArguments = $audioMetadaArguments.Substring(1) + $dispositionMetadataArguments
         
-        iex "& $ffmpegPath -i `"$SourcePath`" -map 0$excludeTracksArguments -c:v libx265 -crf 28 -preset fast -vtag hvc1 -c:a copy $metadataArguments -c:s copy `"$mp4DestinationPath`""
+        Write-Information "Using CRF: $crf"
+
+        iex "& $ffmpegPath -i `"$SourcePath`" -map 0$excludeTracksArguments -c:v libx265 -crf $crf -preset fast -vtag hvc1 -c:a copy $metadataArguments -c:s copy `"$mp4DestinationPath`""
     }
     else
     {
