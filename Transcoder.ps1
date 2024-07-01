@@ -2,7 +2,7 @@
 $ffprobePath = "D:\Transcoding\ffprobe.exe"
 $transcodedExtension = "mp4"
 
-$crfTable = @{ '480p'='28'; '720p'='26'; '1080p'='24'; '2160p'='22' }
+$crfTable = @{ '480p'='28'; '720p'='24'; '1080p'='24'; '2160p'='24' }
 
 class TrackConfiguration
 {
@@ -115,8 +115,24 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath, [TranscoderConfig
 
         $streams = (Transcoder-ListContainer -SourcePath $SourcePath).streams
         
-        $videoStream = $streams | where { $_.codec_type -eq 'video' -and $_.duration_ts -gt 1 }
+        $videoStream = $streams | where { $_.codec_type -eq 'video' -and ($_.duration_ts -gt 1 -or $_.start_pts -gt 100 -or $_.disposition.default -eq 1 ) }
+        $subtitleStreams = $streams | where { $_.codec_type -eq 'subtitle' }
         
+        $videoCodec = 'libx265'
+        $subtitleCodec = '-c:s copy'
+
+        if ($videoStream.codec_name -eq 'hevc') {
+            $videoCodec = 'copy'
+        }
+        
+        if ($subtitleStreams.codec_name -ne 'mov_text') {
+            $subtitleCodec = '-c:s mov_text'
+        }
+
+        if ($subtitleStreams.codec_name -eq 'hdmv_pgs_subtitle') {
+            $subtitleCodec = '-sn'
+        }
+
         $crf = '28'
         if ($videoStream.coded_height -ge 720) {
             $crf = $crfTable['720p']
@@ -142,7 +158,7 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath, [TranscoderConfig
         
         Write-Information "Using CRF: $crf"
 
-        iex "& $ffmpegPath -i `"$SourcePath`" -map 0$excludeTracksArguments -c:v libx265 -crf $crf -preset fast -vtag hvc1 -c:a copy $metadataArguments -c:s copy `"$mp4DestinationPath`""
+        iex "& $ffmpegPath -i `"$SourcePath`" -map 0$excludeTracksArguments -c:v $videoCodec -crf $crf -preset fast -vtag hvc1 -c:a copy $metadataArguments $subtitleCodec `"$mp4DestinationPath`""
     }
     else
     {
@@ -238,7 +254,7 @@ function Transcoder-IsVideo($SourcePath)
     }
     
     $streams | foreach {
-        if ($_.codec_type -eq "video" -and $_.duration_ts -gt 1) {
+        if ($_.codec_type -eq "video" -and ($_.duration_ts -gt 1 -or $_.start_pts -gt 100 -or $_.disposition.default -eq 1 )) {
             $isVideo = $true
         }
     }
