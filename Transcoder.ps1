@@ -35,12 +35,14 @@ class TranscoderConfiguration
 {
   [int32] $GroupSize = 6
   [boolean] $EnablePngTrackDropping = $false
+  [boolean] $EnableSubtitleTrackDropping = $false
   [TrackConfiguration[]] $TrackConfigurations = @()
 
   [void] Deserialize($hashTable)
   {
     $this.GroupSize = $hashTable.GroupSize
     $this.EnablePngTrackDropping = $hashTable.EnablePngTrackDropping
+    $this.EnableSubtitleTrackDropping = $hashTable.EnableSubtitleTrackDropping
     
     $this.TrackConfigurations = @($null) * $hashTable.TrackConfigurations.Count
 
@@ -132,6 +134,12 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath, [TranscoderConfig
         if ($subtitleStreams.codec_name -eq 'hdmv_pgs_subtitle') {
             $subtitleCodec = '-sn'
         }
+        
+        $Configuration
+        if ($Configuration.EnableSubtitleTrackDropping -eq $true)
+        {
+            $subtitleCodec = '-sn'
+        }
 
         $crf = '28'
         if ($videoStream.coded_height -ge 720) {
@@ -157,7 +165,8 @@ function Transcoder-ProcessFile($SourcePath, $DestinationPath, [TranscoderConfig
         $metadataArguments = $audioMetadaArguments.Substring(1) + $dispositionMetadataArguments
         
         Write-Information "Using CRF: $crf"
-
+        
+        "& $ffmpegPath -i `"$SourcePath`" -map 0$excludeTracksArguments -c:v $videoCodec -crf $crf -preset fast -vtag hvc1 -c:a copy $metadataArguments $subtitleCodec `"$mp4DestinationPath`""
         iex "& $ffmpegPath -i `"$SourcePath`" -map 0$excludeTracksArguments -c:v $videoCodec -crf $crf -preset fast -vtag hvc1 -c:a copy $metadataArguments $subtitleCodec `"$mp4DestinationPath`""
     }
     else
@@ -272,6 +281,11 @@ function Transcoder-CreateFolderStructure($FolderPath)
 
 function Transcoder-CreateAudioConfig($LanguageList, $DefaultList)
 {
+    if ($DefaultList -eq $null)
+    {
+        $DefaultList = $LanguageList | foreach { if ($_ -eq 'eng') { '1' } else { '0' } }
+    }
+
     $trackDictionary = @($null) * $LanguageList.Count
 
     $index = 0
